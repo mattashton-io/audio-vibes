@@ -1,0 +1,29 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Audio Vibes - Transcribe Audio to Text</title>
+    <link rel="stylesheet" href="{{ url_for('static', filename='style.css') }}">
+</head>
+<body>
+    <div class="container">
+        <h1>Audio Vibes</h1>
+        <p>Upload an audio file to transcribe it to text.</p>
+        <form id="upload-form" enctype="multipart/form-data">
+            <input type="file" id="audio-file" name="audio" accept="audio/*">
+            <button type="submit">Upload and Transcribe</button>
+        </form>
+        <div id="loading" class="hidden">Transcribing...</div>
+        <div id="transcription-result" class="hidden">
+            <h2>Transcription:</h2>
+            <p id="transcribed-text"></p>
+        </div>
+        <div id="error-message" class="hidden">
+            <h2>Error:</h2>
+            <p id="error-text"></p>
+        </div>
+    </div>
+    <script src="{{ url_for('static', filename='script.js') }}"></script>
+</body>
+</html>
