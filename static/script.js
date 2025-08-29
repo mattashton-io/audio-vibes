@@ -44,17 +44,42 @@ document.addEventListener('DOMContentLoaded', () => {
             clearInterval(interval); // Stop simulating progress
             progressBar.style.width = '100%'; // Complete progress bar
 
-            loadingDiv.classList.add('hidden');
-
             if (response.ok) {
-                const data = await response.json();
-                if (data.transcription) {
-                    transcribedTextP.textContent = data.transcription;
-                    transcriptionResultDiv.classList.remove('hidden');
-                } else {
-                    displayError('Transcription failed: No transcription data received.');
+                const reader = response.body.getReader();
+                const decoder = new TextDecoder('utf-8');
+                let receivedText = '';
+
+                // Clear previous transcription
+                transcribedTextP.textContent = '';
+                transcriptionResultDiv.classList.remove('hidden');
+
+                while (true) {
+                    const { done, value } = await reader.read();
+                    if (done) {
+                        break;
+                    }
+                    const chunk = decoder.decode(value, { stream: true });
+                    // Assuming each 'data:' line contains a transcription segment
+                    const lines = chunk.split('\n');
+                    lines.forEach(line => {
+                        if (line.startsWith('data:')) {
+                            const data = line.substring(5).trim();
+                            try {
+                                // If the backend sends JSON, parse it. Otherwise, treat as plain text.
+                                const json_data = JSON.parse(data);
+                                if (json_data.transcription_segment) {
+                                    transcribedTextP.textContent += json_data.transcription_segment + ' ';
+                                }
+                            } catch (e) {
+                                // If not JSON, append as plain text
+                                transcribedTextP.textContent += data + ' ';
+                            }
+                        }
+                    });
                 }
+                loadingDiv.classList.add('hidden');
             } else {
+                loadingDiv.classList.add('hidden');
                 const errorData = await response.json();
                 displayError(errorData.error || 'An unknown error occurred during upload.');
             }

@@ -1,4 +1,4 @@
-from flask import Flask, request, render_template, jsonify
+from flask import Flask, request, render_template, jsonify, Response, stream_with_context
 import os
 
 app = Flask(__name__)
@@ -26,55 +26,71 @@ def upload_file():
         import io
         import math
 
-        transcribed_text = ""
-        
-        try:
-            client = speech.SpeechClient()
+        # Return a streaming response
+        @stream_with_context
+        def event_stream():
+            full_transcription = ""
+            try:
+                client = speech.SpeechClient()
 
-            audio = AudioSegment.from_file(filepath)
-            
-            # Google Speech-to-Text API has a limit of 1 minute for synchronous recognition
-            # For longer audios, it's recommended to use asynchronous recognition or chunking.
-            # Here, we'll chunk the audio into 55-second segments to stay within limits.
-            chunk_length_ms = 55 * 1000  # 55 seconds
-            total_length_ms = len(audio)
-            
-            num_chunks = math.ceil(total_length_ms / chunk_length_ms)
-
-            for i in range(num_chunks):
-                start_ms = i * chunk_length_ms
-                end_ms = min((i + 1) * chunk_length_ms, total_length_ms)
-                chunk = audio[start_ms:end_ms]
-
-                # Export chunk to a temporary WAV file
-                chunk_filepath = f"{filepath}_chunk_{i}.wav"
-                chunk.export(chunk_filepath, format="wav", parameters=["-acodec", "pcm_s16le", "-ar", "16000", "-ac", "1"])
-
-                with io.open(chunk_filepath, "rb") as audio_file:
-                    content = audio_file.read()
-
-                audio_gcs = RecognitionAudio(content=content)
+                audio = AudioSegment.from_file(filepath)
+                
+                # Define the chunk size for streaming (e.g., 5 seconds)
+                chunk_length_ms = 5 * 1000  # 5 seconds
+                
+                # Configuration for the streaming recognition
                 config = RecognitionConfig(
                     encoding=RecognitionConfig.AudioEncoding.LINEAR16,
-                    sample_rate_hertz=16000,
+                    sample_rate_hertz=audio.frame_rate, # Use actual sample rate from audio file
                     language_code="en-US",
                 )
+                streaming_config = speech.StreamingRecognitionConfig(
+                    config=config,
+                    interim_results=True # Get interim results for continuous transcription
+                )
 
-                response = client.recognize(config=config, audio=audio_gcs)
+                # Generator to yield audio chunks
+                def generate_audio_chunks():
+                    for i in range(0, len(audio), chunk_length_ms):
+                        chunk = audio[i:i + chunk_length_ms]
+                        # Export chunk to bytes in WAV format
+                        buffer = io.BytesIO()
+                        chunk.export(buffer, format="wav", parameters=["-acodec", "pcm_s16le", "-ar", str(audio.frame_rate), "-ac", "1"])
+                        yield buffer.getvalue()
 
-                if response.results:
-                    for result in response.results:
-                        transcribed_text += result.alternatives[0].transcript + " "
-                
-                os.remove(chunk_filepath) # Clean up the chunk file
+                # Create a stream of requests
+                requests = (speech.StreamingRecognizeRequest(audio_content=chunk)
+                            for chunk in generate_audio_chunks())
 
-            transcribed_text = transcribed_text.strip() # Remove trailing space
+                # Perform streaming recognition
+                responses = client.streaming_recognize(streaming_config, requests)
 
-        except Exception as e:
-            transcribed_text = f"Error processing audio file with Google Cloud Speech: {e}"
-        
-        os.remove(filepath) # Clean up the original uploaded file
-        return jsonify({'transcription': transcribed_text})
+                # Process responses
+                for response in responses:
+                    if not response.results:
+                        continue
+
+                    result = response.results[0]
+                    if not result.alternatives:
+                        continue
+
+                    transcript = result.alternatives[0].transcript
+                    
+                    if result.is_final:
+                        full_transcription += transcript + " "
+                        yield f"data: {{\"transcription_segment\": \"{transcript}\"}}\n\n"
+                    # You could send interim results to the frontend here if needed for real-time display
+                    # For now, we'll just accumulate final results and send them as they become final
+
+            except Exception as e:
+                error_message = f"Error during streaming transcription: {e}"
+                yield f"data: {{\"error\": \"{error_message}\"}}\n\n"
+            finally:
+                # Clean up the original uploaded file after the stream is complete
+                if os.path.exists(filepath):
+                    os.remove(filepath)
+
+        return Response(event_stream(), mimetype='text/event-stream')
 
 if __name__ == '__main__':
     app.run(debug=True, port=5002)
