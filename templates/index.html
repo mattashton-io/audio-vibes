@@ -14,7 +14,12 @@
             <input type="file" id="audio-file" name="audio" accept="audio/*">
             <button type="submit">Upload and Transcribe</button>
         </form>
-        <div id="loading" class="hidden">Transcribing...</div>
+        <div id="loading" class="hidden">
+            <p>Transcribing...</p>
+            <div id="progress-bar-container">
+                <div id="progress-bar"></div>
+            </div>
+        </div>
         <div id="transcription-result" class="hidden">
             <h2>Transcription:</h2>
             <p id="transcribed-text"></p>

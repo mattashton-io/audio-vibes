@@ -22,34 +22,58 @@ def upload_file():
         
         from google.cloud import speech
         from google.cloud.speech import RecognitionConfig, RecognitionAudio
+        from pydub import AudioSegment
         import io
+        import math
 
-        transcribed_text = "Transcription failed."
-
+        transcribed_text = ""
+        
         try:
             client = speech.SpeechClient()
 
-            with io.open(filepath, "rb") as audio_file:
-                content = audio_file.read()
+            audio = AudioSegment.from_file(filepath)
+            
+            # Google Speech-to-Text API has a limit of 1 minute for synchronous recognition
+            # For longer audios, it's recommended to use asynchronous recognition or chunking.
+            # Here, we'll chunk the audio into 55-second segments to stay within limits.
+            chunk_length_ms = 55 * 1000  # 55 seconds
+            total_length_ms = len(audio)
+            
+            num_chunks = math.ceil(total_length_ms / chunk_length_ms)
 
-            audio = RecognitionAudio(content=content)
-            config = RecognitionConfig(
-                encoding=RecognitionConfig.AudioEncoding.LINEAR16, # Assuming common audio format
-                sample_rate_hertz=16000, # Common sample rate, adjust if needed
-                language_code="en-US",
-            )
+            for i in range(num_chunks):
+                start_ms = i * chunk_length_ms
+                end_ms = min((i + 1) * chunk_length_ms, total_length_ms)
+                chunk = audio[start_ms:end_ms]
 
-            response = client.recognize(config=config, audio=audio)
+                # Export chunk to a temporary WAV file
+                chunk_filepath = f"{filepath}_chunk_{i}.wav"
+                chunk.export(chunk_filepath, format="wav", parameters=["-acodec", "pcm_s16le", "-ar", "16000", "-ac", "1"])
 
-            if response.results:
-                transcribed_text = response.results[0].alternatives[0].transcript
-            else:
-                transcribed_text = "No transcription results found."
+                with io.open(chunk_filepath, "rb") as audio_file:
+                    content = audio_file.read()
+
+                audio_gcs = RecognitionAudio(content=content)
+                config = RecognitionConfig(
+                    encoding=RecognitionConfig.AudioEncoding.LINEAR16,
+                    sample_rate_hertz=16000,
+                    language_code="en-US",
+                )
+
+                response = client.recognize(config=config, audio=audio_gcs)
+
+                if response.results:
+                    for result in response.results:
+                        transcribed_text += result.alternatives[0].transcript + " "
+                
+                os.remove(chunk_filepath) # Clean up the chunk file
+
+            transcribed_text = transcribed_text.strip() # Remove trailing space
 
         except Exception as e:
             transcribed_text = f"Error processing audio file with Google Cloud Speech: {e}"
         
-        os.remove(filepath) # Clean up the uploaded file
+        os.remove(filepath) # Clean up the original uploaded file
         return jsonify({'transcription': transcribed_text})
 
 if __name__ == '__main__':
