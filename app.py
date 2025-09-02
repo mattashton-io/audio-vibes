@@ -25,11 +25,14 @@ def upload_file():
         from pydub import AudioSegment
         import io
         import math
+        import google.generativeai as genai
+
+        # Configure Gemini API (replace with your actual API key or environment variable)
+        genai.configure(api_key=os.environ.get("GEMINI_API_KEY"))
 
         # Return a streaming response
         @stream_with_context
         def event_stream():
-            full_transcription = ""
             try:
                 client = speech.SpeechClient()
 
@@ -65,6 +68,8 @@ def upload_file():
                 # Perform streaming recognition
                 responses = client.streaming_recognize(streaming_config, requests)
 
+                model = genai.GenerativeModel('gemini-pro')
+
                 # Process responses
                 for response in responses:
                     if not response.results:
@@ -77,13 +82,16 @@ def upload_file():
                     transcript = result.alternatives[0].transcript
                     
                     if result.is_final:
-                        full_transcription += transcript + " "
-                        yield f"data: {{\"transcription_segment\": \"{transcript}\"}}\n\n"
-                    # You could send interim results to the frontend here if needed for real-time display
-                    # For now, we'll just accumulate final results and send them as they become final
-
+                        # Send each final segment to Gemini for formatting
+                        prompt = f"Format the following text into a paragraph style. Ensure proper punctuation and grammar:\n\n{transcript.strip()}"
+                        gemini_response = model.generate_content(prompt)
+                        formatted_segment = gemini_response.text
+                        
+                        # Yield the formatted segment
+                        yield f"data: {{\"transcription_segment\": \"{formatted_segment}\"}}\n\n"
+            
             except Exception as e:
-                error_message = f"Error during streaming transcription: {e}"
+                error_message = f"Error during streaming transcription or formatting: {e}"
                 yield f"data: {{\"error\": \"{error_message}\"}}\n\n"
             finally:
                 # Clean up the original uploaded file after the stream is complete

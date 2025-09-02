@@ -69,6 +69,8 @@ document.addEventListener('DOMContentLoaded', () => {
                                 const json_data = JSON.parse(data);
                                 if (json_data.transcription_segment) {
                                     transcribedTextP.textContent += json_data.transcription_segment + ' ';
+                                } else if (json_data.final_formatted_text) {
+                                    transcribedTextP.textContent = json_data.final_formatted_text;
                                 }
                             } catch (e) {
                                 // If not JSON, append as plain text
@@ -80,8 +82,14 @@ document.addEventListener('DOMContentLoaded', () => {
                 loadingDiv.classList.add('hidden');
             } else {
                 loadingDiv.classList.add('hidden');
-                const errorData = await response.json();
-                displayError(errorData.error || 'An unknown error occurred during upload.');
+                // If the response is not OK, it might still be a JSON error from the server
+                try {
+                    const errorData = await response.json();
+                    displayError(errorData.error || 'An unknown error occurred during upload.');
+                } catch (e) {
+                    // If it's not JSON, display the status text
+                    displayError(`Server error: ${response.status} ${response.statusText}`);
+                }
             }
         } catch (error) {
             clearInterval(interval); // Stop simulating progress
